@@ -7,3 +7,6 @@ edition = "2024"
 reqwest = { version  = "0.12.22", features = ["blocking"] }
 clap = { version = "4.1", features = ["derive"] }
 indicatif = "0.18.0"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1.0"
