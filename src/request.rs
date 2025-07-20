@@ -1,10 +1,15 @@
 use reqwest::blocking::Client;
 use reqwest::header::USER_AGENT;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+use std::fs;
 
 pub fn perform_request(
     method: &str,
     url: &str,
     body: Option<&str>,
+    output: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
 
@@ -20,11 +25,25 @@ pub fn perform_request(
     };
 
     let response = request_builder.send()?;
-    if response.status().is_success() {
-        let text = response.text()?;
-        println!("{}", text);
+    let status = response.status();
+    let content = response.bytes()?;
+
+    if status.is_success() {
+        if let Some(file_path) = output {
+            let path = Path::new(file_path);
+            if let Some(parent) = path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                }
+            }
+            let mut file = File::create(path)?;
+            file.write_all(&content)?;
+            println!("Saved response to {}", file_path);
+        } else {
+            println!("{}", String::from_utf8_lossy(&content));
+        }
         Ok(())
     } else {
-        Err(format!("Request failed with status: {}", response.status()).into())
+        Err(format!("Request failed with status: {}", status).into())
     }
 }
