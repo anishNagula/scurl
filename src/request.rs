@@ -97,7 +97,7 @@ fn save_response_to_file(
     );
 
     let mut downloaded = 0u64;
-    let mut buffer = [0; 8192];
+    let mut buffer = [0; 131072];
     while let Ok(read) = response.read(&mut buffer) {
         if read == 0 {
             break;
