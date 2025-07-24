@@ -9,11 +9,11 @@ pub fn perform_request(
     url: &str,
     body: Option<&str>,
     output: Option<&str>,
-    headers: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
+    let client = Client::builder()
+        .build()?;
 
-    let mut request_builder = match method {
+    let request = match method {
         "POST" => {
             if let Some(data) = body {
                 client.post(url).header(USER_AGENT, "scurl/0.1").body(data.to_string())
@@ -24,32 +24,23 @@ pub fn perform_request(
         _ => client.get(url).header(USER_AGENT, "scurl/0.1"),
     };
 
-    for header in headers {
-        if let Some((key, value)) = header.split_once(':') {
-            request_builder = request_builder.header(key.trim(), value.trim());
-        }
+    let mut response = request.send()?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Request failed with status: {}", status).into());
     }
 
-    let mut response = request_builder.send()?;
-    if !response.status().is_success() {
-        return Err(format!("Request failed with status: {}", response.status()).into());
-    }
-
-    if let Some(file_path) = output {
-        save_to_file(&mut response, file_path)?;
+    if let Some(path) = output {
+        save_to_file(&mut response, path)?;
     } else {
-        let text = response.text()?;
-        println!("{}", text);
+        print_text_response(&mut response)?;
     }
 
     Ok(())
 }
 
-fn save_to_file(
-    response: &mut reqwest::blocking::Response,
-    file_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let path = Path::new(file_path);
+fn save_to_file(response: &mut reqwest::blocking::Response, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let path = Path::new(path);
     if let Some(parent) = path.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
@@ -57,7 +48,6 @@ fn save_to_file(
     }
 
     let mut file = File::create(path)?;
-
     let total_size = response
         .headers()
         .get(CONTENT_LENGTH)
@@ -66,22 +56,26 @@ fn save_to_file(
         .unwrap_or(0);
 
     let mut downloaded = 0u64;
-    let mut buffer = [0; 65536]; // 64 KB buffer
-    while let Ok(read) = response.read(&mut buffer) {
-        if read == 0 {
+    let mut buffer = [0u8; 131072]; // 64 KB buffer
+
+    while let Ok(n) = response.read(&mut buffer) {
+        if n == 0 {
             break;
         }
-        file.write_all(&buffer[..read])?;
-        downloaded += read as u64;
-
-        if total_size > 0 {
-            print!("\rDownloading: {}/{} bytes", downloaded, total_size);
-        } else {
-            print!("\rDownloading: {} bytes", downloaded);
-        }
-        std::io::stdout().flush().unwrap();
+        file.write_all(&buffer[..n])?;
+        downloaded += n as u64;
     }
 
-    println!("\nSaved to {}", file_path);
+    if total_size > 0 && downloaded != total_size {
+        eprintln!("Warning: downloaded {} bytes, expected {}", downloaded, total_size);
+    }
+
+    Ok(())
+}
+
+fn print_text_response(response: &mut reqwest::blocking::Response) -> Result<(), Box<dyn std::error::Error>> {
+    let mut body = String::new();
+    response.read_to_string(&mut body)?;
+    println!("{body}");
     Ok(())
 }
