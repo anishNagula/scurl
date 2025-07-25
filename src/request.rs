@@ -22,10 +22,17 @@ pub fn perform_request(
             }
             rb
         }
+        "PUT" => {
+            let mut rb = client.put(url).header(USER_AGENT, "scurl/0.1");
+            if let Some(data) = body {
+                rb = rb.body(data.to_string());
+            }
+            rb
+        }
+        "DELETE" => client.delete(url).header(USER_AGENT, "scurl/0.1"),
         _ => client.get(url).header(USER_AGENT, "scurl/0.1"),
     };
 
-    // Add custom headers
     for header in headers {
         if let Some((key, value)) = header.split_once(':') {
             request_builder = request_builder.header(key.trim(), value.trim());

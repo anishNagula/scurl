@@ -12,6 +12,8 @@ fn main() {
     let res = match &cli.command {
         Commands::Get { url, output, headers } => perform_request("GET", url, None, output.as_deref(), headers),
         Commands::Post { url, data, output, headers } => perform_request("POST", url, data.as_deref(), output.as_deref(), headers),
+        Commands::Put { url, data, output, headers } => perform_request("PUT", url, data.as_deref(), output.as_deref(), headers),
+        Commands::Delete { url, output, headers } => perform_request("DELETE", url, None, output.as_deref(), headers),
     };
 
     if let Err(e) = res {
