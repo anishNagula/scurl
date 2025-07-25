@@ -1,46 +1,60 @@
 use reqwest::blocking::Client;
-use reqwest::header::{USER_AGENT, CONTENT_LENGTH};
+use reqwest::header::USER_AGENT;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
+use anyhow::{Result, anyhow};
 
 pub fn perform_request(
     method: &str,
     url: &str,
     body: Option<&str>,
     output: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::builder()
-        .build()?;
+    headers: &[String],
+) -> Result<()> {
+    let client = Client::new();
 
-    let request = match method {
+    let mut request_builder = match method {
         "POST" => {
+            let mut rb = client.post(url).header(USER_AGENT, "scurl/0.1");
             if let Some(data) = body {
-                client.post(url).header(USER_AGENT, "scurl/0.1").body(data.to_string())
-            } else {
-                client.post(url).header(USER_AGENT, "scurl/0.1")
+                rb = rb.body(data.to_string());
             }
+            rb
         }
         _ => client.get(url).header(USER_AGENT, "scurl/0.1"),
     };
 
-    let mut response = request.send()?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("Request failed with status: {}", status).into());
+    // Add custom headers
+    for header in headers {
+        if let Some((key, value)) = header.split_once(':') {
+            request_builder = request_builder.header(key.trim(), value.trim());
+        } else {
+            eprintln!("Warning: Invalid header format '{}', expected 'Key: Value'", header);
+        }
     }
 
-    if let Some(path) = output {
-        save_to_file(&mut response, path)?;
+    let mut response = request_builder.send()?;
+    let status = response.status();
+
+    if !status.is_success() {
+        return Err(anyhow!("Request failed with status: {}", status));
+    }
+
+    if let Some(file_path) = output {
+        save_response_to_file(&mut response, file_path)?;
     } else {
-        print_text_response(&mut response)?;
+        print_response(&mut response)?;
     }
 
     Ok(())
 }
 
-fn save_to_file(response: &mut reqwest::blocking::Response, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let path = Path::new(path);
+fn save_response_to_file(
+    response: &mut reqwest::blocking::Response,
+    file_path: &str,
+) -> Result<()> {
+    let path = Path::new(file_path);
     if let Some(parent) = path.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
@@ -48,34 +62,20 @@ fn save_to_file(response: &mut reqwest::blocking::Response, path: &str) -> Resul
     }
 
     let mut file = File::create(path)?;
-    let total_size = response
-        .headers()
-        .get(CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-
-    let mut downloaded = 0u64;
-    let mut buffer = [0u8; 131072]; // 64 KB buffer
-
-    while let Ok(n) = response.read(&mut buffer) {
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buffer[..n])?;
-        downloaded += n as u64;
+    let mut buffer = [0; 8192];
+    loop {
+        let read = response.read(&mut buffer)?;
+        if read == 0 { break; }
+        file.write_all(&buffer[..read])?;
     }
 
-    if total_size > 0 && downloaded != total_size {
-        eprintln!("Warning: downloaded {} bytes, expected {}", downloaded, total_size);
-    }
-
+    println!("Saved to {}", file_path);
     Ok(())
 }
 
-fn print_text_response(response: &mut reqwest::blocking::Response) -> Result<(), Box<dyn std::error::Error>> {
+fn print_response(response: &mut reqwest::blocking::Response) -> Result<()> {
     let mut body = String::new();
     response.read_to_string(&mut body)?;
-    println!("{body}");
+    println!("{}", body);
     Ok(())
 }

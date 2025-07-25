@@ -10,8 +10,8 @@ fn main() {
     let cli = Cli::parse();
 
     let res = match &cli.command {
-        Commands::Get { url, output } => perform_request("GET", url, None, output.as_deref()),
-        Commands::Post { url, data, output } => perform_request("POST", url, data.as_deref(), output.as_deref()),
+        Commands::Get { url, output, headers } => perform_request("GET", url, None, output.as_deref(), headers),
+        Commands::Post { url, data, output, headers } => perform_request("POST", url, data.as_deref(), output.as_deref(), headers),
     };
 
     if let Err(e) = res {
