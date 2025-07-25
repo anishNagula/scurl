@@ -1,19 +1,18 @@
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::header::USER_AGENT;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use anyhow::{Result, anyhow};
 
 pub fn perform_request(
+    client: &Client,
     method: &str,
     url: &str,
     body: Option<&str>,
     output: Option<&str>,
     headers: &[String],
 ) -> Result<()> {
-    let client = Client::new();
-
     let mut request_builder = match method {
         "POST" => {
             let mut rb = client.post(url).header(USER_AGENT, "scurl/0.1");
@@ -57,8 +56,9 @@ pub fn perform_request(
     Ok(())
 }
 
+
 fn save_response_to_file(
-    response: &mut reqwest::blocking::Response,
+    response: &mut Response,
     file_path: &str,
 ) -> Result<()> {
     let path = Path::new(file_path);
@@ -68,21 +68,23 @@ fn save_response_to_file(
         }
     }
 
-    let mut file = File::create(path)?;
-    let mut buffer = [0; 8192];
+    let file = File::create(path)?;
+    let mut writer = BufWriter::with_capacity(128 * 1024, file);
+    let mut buffer = [0; 128 * 1024];
     loop {
         let read = response.read(&mut buffer)?;
         if read == 0 { break; }
-        file.write_all(&buffer[..read])?;
+        writer.write_all(&buffer[..read])?;
     }
 
+    writer.flush()?;
     println!("Saved to {}", file_path);
     Ok(())
 }
 
-fn print_response(response: &mut reqwest::blocking::Response) -> Result<()> {
-    let mut body = String::new();
-    response.read_to_string(&mut body)?;
-    println!("{}", body);
+fn print_response(response: &mut Response) -> Result<()> {
+    let mut body = Vec::new();
+    response.read_to_end(&mut body)?;
+    println!("{}", String::from_utf8_lossy(&body));
     Ok(())
 }
