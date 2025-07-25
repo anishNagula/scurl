@@ -1,90 +1,82 @@
-use reqwest::blocking::{Client, Response};
-use reqwest::header::USER_AGENT;
-use std::fs::{self, File};
-use std::io::{BufWriter, Read, Write};
-use std::path::Path;
-use anyhow::{Result, anyhow};
+use hyper::body::HttpBody as _;
+use hyper::{Body, Client, Request};
+use hyper_tls::HttpsConnector;
+use std::fs::File;
+use std::io::{self, Write};
+use std::time::Instant;
 
-pub fn perform_request(
-    client: &Client,
+/// Perform GET or POST request
+pub async fn perform_request(
     method: &str,
     url: &str,
     body: Option<&str>,
     output: Option<&str>,
     headers: &[String],
-) -> Result<()> {
-    let mut request_builder = match method {
-        "POST" => {
-            let mut rb = client.post(url).header(USER_AGENT, "scurl/0.1");
-            if let Some(data) = body {
-                rb = rb.body(data.to_string());
-            }
-            rb
-        }
-        "PUT" => {
-            let mut rb = client.put(url).header(USER_AGENT, "scurl/0.1");
-            if let Some(data) = body {
-                rb = rb.body(data.to_string());
-            }
-            rb
-        }
-        "DELETE" => client.delete(url).header(USER_AGENT, "scurl/0.1"),
-        _ => client.get(url).header(USER_AGENT, "scurl/0.1"),
-    };
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, Body>(https);
+
+    // Build request
+    let mut req_builder = Request::builder()
+        .method(method)
+        .uri(url)
+        .header("User-Agent", "SCurl/0.1");
 
     for header in headers {
-        if let Some((key, value)) = header.split_once(':') {
-            request_builder = request_builder.header(key.trim(), value.trim());
-        } else {
-            eprintln!("Warning: Invalid header format '{}', expected 'Key: Value'", header);
+        if let Some((k, v)) = header.split_once(':') {
+            req_builder = req_builder.header(k.trim(), v.trim());
         }
     }
 
-    let mut response = request_builder.send()?;
-    let status = response.status();
-
-    if !status.is_success() {
-        return Err(anyhow!("Request failed with status: {}", status));
-    }
-
-    if let Some(file_path) = output {
-        save_response_to_file(&mut response, file_path)?;
+    let request = if let Some(data) = body {
+        req_builder.body(Body::from(data.to_owned()))?
     } else {
-        print_response(&mut response)?;
+        req_builder.body(Body::empty())?
+    };
+
+    let start = Instant::now();
+    let mut response = client.request(request).await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed: {}", response.status()).into());
     }
 
+    if let Some(path) = output {
+        save_to_file(&mut response, path).await?;
+    } else {
+        print_to_stdout(&mut response).await?;
+    }
+
+    eprintln!("Completed in {:.2?}", start.elapsed());
     Ok(())
 }
 
+/// Save response body to a file with a minimal progress output
+async fn save_to_file(
+    response: &mut hyper::Response<Body>,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut file = File::create(path)?;
+    let mut total = 0usize;
 
-fn save_response_to_file(
-    response: &mut Response,
-    file_path: &str,
-) -> Result<()> {
-    let path = Path::new(file_path);
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
+    while let Some(chunk) = response.body_mut().data().await {
+        let data = chunk?;
+        file.write_all(&data)?;
+        total += data.len();
+        eprint!("\rDownloading: {} bytes", total);
     }
 
-    let file = File::create(path)?;
-    let mut writer = BufWriter::with_capacity(128 * 1024, file);
-    let mut buffer = [0; 128 * 1024];
-    loop {
-        let read = response.read(&mut buffer)?;
-        if read == 0 { break; }
-        writer.write_all(&buffer[..read])?;
-    }
-
-    writer.flush()?;
-    println!("Saved to {}", file_path);
+    eprintln!("\nSaved to {}", path);
     Ok(())
 }
 
-fn print_response(response: &mut Response) -> Result<()> {
-    let mut body = Vec::new();
-    response.read_to_end(&mut body)?;
-    println!("{}", String::from_utf8_lossy(&body));
+/// Print response body to stdout
+async fn print_to_stdout(
+    response: &mut hyper::Response<Body>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut stdout = io::stdout();
+    while let Some(chunk) = response.body_mut().data().await {
+        stdout.write_all(&chunk?)?;
+    }
     Ok(())
 }

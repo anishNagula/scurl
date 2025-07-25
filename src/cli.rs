@@ -25,20 +25,4 @@ pub enum Commands {
         #[arg(short = 'H', long = "header")]
         headers: Vec<String>,
     },
-    Put {
-        url: String,
-        #[arg(short, long)]
-        data: Option<String>,
-        #[arg(short, long)]
-        output: Option<String>,
-        #[arg(short = 'H', long = "header")]
-        headers: Vec<String>,
-    }, 
-    Delete {
-        url: String,
-        #[arg(short, long)]
-        output: Option<String>,
-        #[arg(short = 'H', long = "header")]
-        headers: Vec<String>,
-    }
 }
