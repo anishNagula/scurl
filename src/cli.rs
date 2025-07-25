@@ -15,6 +15,8 @@ pub enum Commands {
         output: Option<String>,
         #[arg(short = 'H', long = "header")]
         headers: Vec<String>,
+        #[arg(short, long)]
+        verbose: bool,
     },
     Post {
         url: String,
@@ -24,5 +26,7 @@ pub enum Commands {
         output: Option<String>,
         #[arg(short = 'H', long = "header")]
         headers: Vec<String>,
+        #[arg(short, long)]
+        verbose: bool,
     },
 }

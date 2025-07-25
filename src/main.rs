@@ -1,5 +1,6 @@
 mod cli;
 mod request;
+mod utils;
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -13,13 +14,13 @@ fn main() {
 
     rt.block_on(async {
         match  &cli.command {
-            Commands::Get { url, output, headers } => {
-                if let Err(e) = perform_request("GET", url, None, output.as_deref(), headers).await {
+            Commands::Get { url, output, headers, verbose } => {
+                if let Err(e) = perform_request("GET", url, None, output.as_deref(), headers, *verbose).await {
                     eprintln!("Error: {}", e);
                 }
             }
-            Commands::Post { url, data, output, headers } => {
-                if let Err(e) = perform_request("POST", url, data.as_deref(), output.as_deref(), headers).await {
+            Commands::Post { url, data, output, headers, verbose } => {
+                if let Err(e) = perform_request("POST", url, data.as_deref(), output.as_deref(), headers, *verbose).await {
                     eprintln!("Error: {}", e);
                 }
             }
