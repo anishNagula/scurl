@@ -26,6 +26,7 @@ target/release/scurl
 ```
 
 ## Usage
+
 ### GET Request
 ```bash
 cargo run -- get https://example.com
