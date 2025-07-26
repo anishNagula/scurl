@@ -39,7 +39,13 @@ pub async fn perform_request(
 
     for redirect_count in 0..=MAX_REDIRECTS {
         if verbose {
-            eprintln!("Requesting: {} {}", method, current_url);
+            eprintln!("> {} {}", method, current_url);
+            for h in headers {
+                eprintln!("> {}", h);
+            }
+            if let Some(data) = body {
+                eprintln!("> Body: {} bytes", data.len());
+            }
         }
 
         let mut req_builder = Request::builder()
@@ -61,6 +67,13 @@ pub async fn perform_request(
         };
 
         let mut response = client.request(request).await?;
+
+        if verbose {
+            eprintln!("< HTTP/{:?} {}", response.version(), response.status());
+            for (key, value) in response.headers() {
+                eprintln!("< {}: {}", key, value.to_str().unwrap_or("<invalid>"));
+            }
+        }
 
         // Follow redirects up to MAX_REDIRECTS
         if response.status().is_redirection() {
