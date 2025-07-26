@@ -24,6 +24,11 @@ fn main() {
                     eprintln!("Error: {}", e);
                 }
             }
+            Commands::Head { url, headers, verbose } => {
+                if let Err(e) = perform_request("HEAD", url, None, None, headers, *verbose).await {
+                    eprintln!("Error: {}", e);
+                }
+            }
         }
     });
 }

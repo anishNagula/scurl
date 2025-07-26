@@ -29,4 +29,11 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    Head {
+        url: String,
+         #[arg(short = 'H', long = "header")]
+        headers: Vec<String>,
+        #[arg(short, long)]
+        verbose: bool,
+    }
 }

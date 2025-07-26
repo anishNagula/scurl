@@ -9,11 +9,10 @@ use std::time::Instant;
 
 use crate::utils::progress_bar;
 
-/// Maximum redirects allowed
+/// maximum no.of redirects allowed
 const MAX_REDIRECTS: usize = 5;
 
-// Create a reusable static client for connection pooling
-// We use `Arc` here in case you want to share it more explicitly
+// create reusable static client for connection pooling
 static CLIENT: once_cell::sync::Lazy<Arc<Client<HttpsConnector<HttpConnector>>>> = once_cell::sync::Lazy::new(|| {
     let https = HttpsConnector::new();
     let client = Client::builder()
@@ -23,7 +22,7 @@ static CLIENT: once_cell::sync::Lazy<Arc<Client<HttpsConnector<HttpConnector>>>>
     Arc::new(client)
 });
 
-/// Perform GET or POST request with redirects and optional verbose output
+
 pub async fn perform_request(
     method: &str,
     url: &str,
@@ -75,7 +74,7 @@ pub async fn perform_request(
             }
         }
 
-        // Follow redirects up to MAX_REDIRECTS
+        // follow redirects upto MAX_REDIRECTS
         if response.status().is_redirection() {
             if let Some(location) = response.headers().get("Location") {
                 current_url = location.to_str()?.to_string();
@@ -91,22 +90,34 @@ pub async fn perform_request(
             return Err(format!("Request failed: {}", response.status()).into());
         }
 
+        // for HEAD
+        if method.eq_ignore_ascii_case("HEAD") {
+            if !verbose {
+                eprintln!("HTTP/{:?} {}", response.version(), response.status());
+                for (key, value) in response.headers() {
+                    eprintln!("{}: {}", key, value.to_str().unwrap_or("<invalid>"));
+                }
+            }
+            eprintln!("Time taken: {:.2?}", start.elapsed());
+            return Ok(());
+        }
+
+        // for GET/POST
         if let Some(path) = output {
             save_to_file(&mut response, path, verbose).await?;
         } else {
             print_to_stdout(&mut response).await?;
         }
 
-        if verbose {
-            eprintln!("Completed in {:.2?}", start.elapsed());
-        }
+        eprintln!("Time taken: {:.2?}", start.elapsed());
         return Ok(());
     }
 
     Err("Failed after redirects".into())
 }
 
-/// Save response body to a file with buffered writes and progress bar if applicable
+
+// save response body to file with buffered writes and progress bar
 async fn save_to_file(
     response: &mut hyper::Response<Body>,
     path: &str,
@@ -115,7 +126,6 @@ async fn save_to_file(
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
-    // Get content length header if present
     let total_size = response
         .headers()
         .get("Content-Length")
@@ -123,7 +133,7 @@ async fn save_to_file(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    // Skip progress bar for small or unknown size files (< 50 KB)
+    // skip progress bar for small/unknown size files (<50KB)
     let use_progress = total_size > 50_000;
 
     let mut pb = if use_progress {
@@ -156,7 +166,7 @@ async fn save_to_file(
     Ok(())
 }
 
-/// Print response body directly to stdout
+/// print response body directly to stdout
 async fn print_to_stdout(
     response: &mut hyper::Response<Body>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

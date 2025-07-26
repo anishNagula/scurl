@@ -21,8 +21,8 @@ impl ProgressBar {
         let filled = (percent / 2.5) as usize; // 40 chars bar
         let bar = format!(
             "{}{}",
-            style("█".repeat(filled)).green(),
-            style("░".repeat(40 - filled)).blue()
+            style("#".repeat(filled)).green(),
+            style("-".repeat(40 - filled)).blue()
         );
         let msg = format!("\r[{}] {:>6.2}%", bar, percent);
         let _ = self.term.write_str(&msg);
