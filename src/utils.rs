@@ -1,23 +1,48 @@
+// utils.rs
 use console::{style, Term};
+use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct ProgressBar {
+    inner: Arc<Mutex<ProgressBarInner>>,
+}
+
+struct ProgressBarInner {
     total: u64,
+    current: u64,
     term: Term,
 }
 
 impl ProgressBar {
     pub fn new(total: u64) -> Self {
         Self {
-            total,
-            term: Term::stdout(),
+            inner: Arc::new(Mutex::new(ProgressBarInner {
+                total,
+                current: 0,
+                term: Term::stdout(),
+            })),
         }
     }
 
-    pub fn update(&mut self, current: u64) {
-        if self.total == 0 {
-            return;
+    // This method will set the absolute current progress
+    pub fn set_progress(&self, new_current: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current = new_current; // Directly set the current value
+        self.draw_bar(&mut inner);
+    }
+
+    // This method will increment the current progress
+    pub fn inc(&self, amount: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current += amount; // Increment the current value
+        self.draw_bar(&mut inner);
+    }
+
+    fn draw_bar(&self, inner: &mut std::sync::MutexGuard<'_, ProgressBarInner>) {
+        if inner.total == 0 {
+            return; // Avoid division by zero and drawing for unknown total
         }
-        let percent = (current as f64 / self.total as f64) * 100.0;
+        let percent = (inner.current as f64 / inner.total as f64) * 100.0;
         let filled = (percent / 2.5) as usize; // 40 chars bar
         let bar = format!(
             "{}{}",
@@ -25,11 +50,12 @@ impl ProgressBar {
             style("-".repeat(40 - filled)).blue()
         );
         let msg = format!("\r[{}] {:>6.2}%", bar, percent);
-        let _ = self.term.write_str(&msg);
+        let _ = inner.term.write_str(&msg);
     }
 
-    pub fn finish(&mut self) {
-        let _ = self.term.write_str("\nDownload complete!\n");
+    pub fn finish(&self) {
+        let inner = self.inner.lock().unwrap(); // Lock for final message
+        let _ = inner.term.write_str("\nDownload complete!\n");
     }
 }
 

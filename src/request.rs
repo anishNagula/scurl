@@ -2,26 +2,40 @@ use hyper::{Body, Client, Request};
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
 use hyper::body::HttpBody as _;
+use std::fs::OpenOptions;
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::utils::progress_bar;
 
-/// maximum no.of redirects allowed
+/// Maximum no.of redirects allowed
 const MAX_REDIRECTS: usize = 5;
 
-// create reusable static client for connection pooling
-static CLIENT: once_cell::sync::Lazy<Arc<Client<HttpsConnector<HttpConnector>>>> = once_cell::sync::Lazy::new(|| {
-    let https = HttpsConnector::new();
-    let client = Client::builder()
-        .pool_max_idle_per_host(10)
-        .http1_title_case_headers(true)
-        .build::<_, Body>(https);
-    Arc::new(client)
-});
+/// Number of parallel chunks to fetch (can be tuned)
+const PARALLEL_CHUNKS: u64 = 32;
 
+// Create reusable static client for connection pooling
+static CLIENT: once_cell::sync::Lazy<Arc<Client<HttpsConnector<HttpConnector>>>> =
+    once_cell::sync::Lazy::new(|| {
+        let https = HttpsConnector::new();
+        let client = Client::builder()
+            .pool_max_idle_per_host(50)
+            .http1_title_case_headers(true)
+            .build::<_, Body>(https);
+        Arc::new(client)
+    });
+
+async fn print_to_stdout(
+    response: &mut hyper::Response<Body>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut stdout = io::stdout();
+    while let Some(chunk) = response.body_mut().data().await {
+        stdout.write_all(&chunk?)?;
+    }
+    Ok(())
+}
 
 pub async fn perform_request(
     method: &str,
@@ -74,7 +88,7 @@ pub async fn perform_request(
             }
         }
 
-        // follow redirects upto MAX_REDIRECTS
+        // Follow redirects up to MAX_REDIRECTS
         if response.status().is_redirection() {
             if let Some(location) = response.headers().get("Location") {
                 current_url = location.to_str()?.to_string();
@@ -90,7 +104,7 @@ pub async fn perform_request(
             return Err(format!("Request failed: {}", response.status()).into());
         }
 
-        // for HEAD
+        // For HEAD
         if method.eq_ignore_ascii_case("HEAD") {
             if !verbose {
                 eprintln!("HTTP/{:?} {}", response.version(), response.status());
@@ -102,9 +116,9 @@ pub async fn perform_request(
             return Ok(());
         }
 
-        // for GET/POST
+        // For GET/POST
         if let Some(path) = output {
-            save_to_file(&mut response, path, verbose).await?;
+            save_to_file(&mut response, path, url, headers, verbose).await?;
         } else {
             print_to_stdout(&mut response).await?;
         }
@@ -116,16 +130,13 @@ pub async fn perform_request(
     Err("Failed after redirects".into())
 }
 
-
-// save response body to file with buffered writes and progress bar
 async fn save_to_file(
     response: &mut hyper::Response<Body>,
     path: &str,
+    url: &str,
+    headers: &[String],
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let file = File::create(path)?;
-    let mut writer = BufWriter::new(file);
-
     let total_size = response
         .headers()
         .get("Content-Length")
@@ -133,46 +144,110 @@ async fn save_to_file(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    // skip progress bar for small/unknown size files (<50KB)
-    let use_progress = total_size > 50_000;
+    if total_size > 5_000_000 && total_size > 0 {
+        if verbose {
+            eprintln!("Using parallel download for {} ({} bytes)", path, total_size);
+        }
+        return parallel_download(url, path, total_size, headers, verbose).await;
+    }
 
-    let mut pb = if use_progress {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+
+    let pb = if total_size > 50_000 && total_size > 0 {
         Some(progress_bar(total_size))
     } else {
         None
     };
 
-    let mut downloaded: u64 = 0;
-
     while let Some(chunk) = response.body_mut().data().await {
         let data = chunk?;
         writer.write_all(&data)?;
-        downloaded += data.len() as u64;
 
-        if let Some(pb) = pb.as_mut() {
-            pb.update(downloaded);
+        if let Some(ref bar) = pb {
+            bar.inc(data.len() as u64);
         }
     }
 
     writer.flush()?;
 
-    if let Some(mut pb) = pb {
-        pb.finish();
+    if let Some(bar) = pb {
+        bar.finish();
     }
 
     if verbose {
         eprintln!("Saved to {}", path);
     }
+
     Ok(())
 }
 
-/// print response body directly to stdout
-async fn print_to_stdout(
-    response: &mut hyper::Response<Body>,
+
+
+/// Parallel chunked download
+async fn parallel_download(
+    url: &str,
+    path: &str,
+    total_size: u64,
+    headers: &[String],
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut stdout = io::stdout();
-    while let Some(chunk) = response.body_mut().data().await {
-        stdout.write_all(&chunk?)?;
+    let chunk_size = total_size / PARALLEL_CHUNKS;
+    let pb = progress_bar(total_size);
+
+    let mut tasks = vec![];
+    for i in 0..PARALLEL_CHUNKS {
+        let start = i * chunk_size;
+        let end = if i == PARALLEL_CHUNKS - 1 {
+            total_size - 1
+        } else {
+            (i + 1) * chunk_size - 1
+        };
+
+        let range = format!("bytes={}-{}", start, end);
+        let url = url.to_string();
+        let headers = headers.to_vec();
+        let pb_clone = pb.clone();
+
+        tasks.push(tokio::spawn(async move {
+            let https = HttpsConnector::new();
+            let client = Client::builder().build::<_, Body>(https);
+
+            let mut req_builder = Request::builder()
+                .method("GET")
+                .uri(&url)
+                .header("User-Agent", "scurl/0.2")
+                .header("Range", range);
+
+            for header in &headers {
+                if let Some((k, v)) = header.split_once(':') {
+                    req_builder = req_builder.header(k.trim(), v.trim());
+                }
+            }
+
+            let mut res = client.request(req_builder.body(Body::empty())?).await?;
+            let mut data = Vec::new();
+
+            while let Some(chunk) = res.body_mut().data().await {
+                let c = chunk?;
+                pb_clone.inc(c.len() as u64);
+                data.extend_from_slice(&c);
+            }
+
+            Ok::<(u64, Vec<u8>), Box<dyn std::error::Error + Send + Sync>>((start, data))
+        }));
+    }
+
+    let mut file = OpenOptions::new().create(true).write(true).open(path)?;
+    for task in tasks {
+        let (start, data) = task.await??;
+        file.seek(SeekFrom::Start(start))?;
+        file.write_all(&data)?;
+    }
+
+    pb.finish();
+    if verbose {
+        eprintln!("Saved to {}", path);
     }
     Ok(())
 }

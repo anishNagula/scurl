@@ -11,3 +11,4 @@ clap = { version = "4.4", features = ["derive"] }
 futures-util = "0.3"
 console = "0.16.0"
 once_cell = "1.17"
+futures = "0.3"
