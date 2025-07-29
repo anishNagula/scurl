@@ -24,13 +24,6 @@ impl ProgressBar {
         }
     }
 
-    // This method will set the absolute current progress
-    pub fn set_progress(&self, new_current: u64) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.current = new_current; // Directly set the current value
-        self.draw_bar(&mut inner);
-    }
-
     // This method will increment the current progress
     pub fn inc(&self, amount: u64) {
         let mut inner = self.inner.lock().unwrap();
