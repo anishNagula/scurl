@@ -7,14 +7,15 @@
 - **GET and POST requests**  
 - **Custom headers** with `-H "Key: Value"`  
 - **File download** with progress bar (`-o <file>`)  
-- **Basic request body support** for POST (`-d <data>`)  
-- **Logs each step** of the request process  
-- **Text vs binary output detection**
 
 ---
 
 ## Installation
+
+### Option 1: Build from source (requires Rust)
+
 Clone the repo and build using Cargo:
+
 ```bash
 git clone https://github.com/<your-username>/scurl.git
 cd scurl
@@ -24,6 +25,21 @@ The compiled binary will be available at:
 ```bash
 target/release/scurl
 ```
+
+### Option 2: Use prebuilt macOS binary
+If you're on macOS, you can install directly using the provided precompiled binary:
+```bash
+git clone https://github.com/<your-username>/scurl.git
+cd scurl
+./install-macos.sh
+```
+This will install `scurl` to `/usr/local/bin/`.
+
+To verify:
+```bash
+scurl --version
+```
+---
 
 ## Usage
 
