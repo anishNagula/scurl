@@ -6,7 +6,7 @@
 ## Features (so far)
 - **GET and POST requests**  
 - **Custom headers** with `-H "Key: Value"`  
-- **File download** with progress bar (`-o <file>`)  
+- **File download** with progress bar (`-o <file>`) 
 
 ---
 
